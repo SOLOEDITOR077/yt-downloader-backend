@@ -1,53 +1,44 @@
 const express = require('express');
-const { execFile } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { spawn } = require('child_process');
+const cors = require('cors');
+const app = express();
 
-const app = express(); // ✅ THIS LINE WAS MISSING
-const PORT = 3000;
-
+app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
 
 app.post('/download', (req, res) => {
-  const videoUrl = req.body.url;
-  const outputPath = path.join(__dirname, 'video.mp4');
+  const url = req.body.url;
+  if (!url) return res.status(400).send('Missing URL');
 
-  if (!videoUrl) {
-    return res.status(400).send('No URL provided');
-  }
+  res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
+  res.setHeader('Content-Type', 'video/mp4');
 
-  console.log('🛰️ Download request received for:', videoUrl);
+  const ytdlp = spawn('./yt-dlp_linux', [
+    '-f', 'best',
+    '--merge-output-format', 'mp4',
+    '-o', '-',
+    url
+  ]);
 
-  execFile(path.join(__dirname, 'yt-dlp.exe'), [
-    '-f', 'mp4',
-    '-o', outputPath,
-    videoUrl
-  ], (error, stdout, stderr) => {
-    if (error) {
-      console.error('❌ yt-dlp error:', error.message);
-      console.error('📄 stderr:', stderr);
-      return res.status(500).send('Download failed');
+  ytdlp.stdout.pipe(res);
+
+  ytdlp.stderr.on('data', (data) => {
+    console.error(`stderr: ${data}`);
+  });
+
+  ytdlp.on('error', (err) => {
+    console.error('Failed to start yt-dlp:', err);
+    res.status(500).send('❌ Failed to download!');
+  });
+
+  ytdlp.on('close', (code) => {
+    if (code !== 0) {
+      console.error(`yt-dlp exited with code ${code}`);
     }
-
-    console.log('✅ Download complete:', outputPath);
-
-    res.download(outputPath, 'video.mp4', (err) => {
-      if (err) {
-        console.error('❌ Error sending file:', err.message);
-        return;
-      }
-      console.log('📤 File sent to browser');
-
-      // Cleanup
-      if (fs.existsSync(outputPath)) {
-        fs.unlinkSync(outputPath);
-        console.log('🗑️ File deleted after sending');
-      }
-    });
   });
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
